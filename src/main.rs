@@ -110,6 +110,12 @@ async fn main() -> Result<(), Exception> {
                 .long("serial-file")
                 .value_name("FILE")
                 .help("Ballot serials LIST file.")
+                .required(true))
+            .arg(Arg::with_name("xxn_config")
+                .short("x")
+                .long("xxn")
+                .value_name("FILE")
+                .help("XX Network configuration file")
                 .required(true)))
         .subcommand(SubCommand::with_name("step5")
             .about("Step 5: --VOTE-- (This command does nothing.)"))
@@ -196,6 +202,20 @@ async fn main() -> Result<(), Exception> {
                 .value_name("FILE")
                 .help("Proof of inclusion in YAML format (Given by gen subcommand).")
                 .required(true)))
+        .subcommand(SubCommand::with_name("audit")
+            .about("Blockchain audit, count votes in blockchain")
+            .arg(Arg::with_name("poll_configuration")
+                .short("c")
+                .long("config")
+                .value_name("FILE")
+                .help("Poll configuration YAML file.")
+                .required(true))
+            .arg(Arg::with_name("xxn_config")
+                .short("x")
+                .long("xxn")
+                .value_name("FILE")
+                .help("XX Network configuration file")
+                .required(true)))
         .get_matches();
 
     stderrlog::new().verbosity(4).init().unwrap();
@@ -233,7 +253,8 @@ async fn main() -> Result<(), Exception> {
             record_audited_ballots(
                 arguments.value_of("poll_configuration").unwrap(),
                 arguments.value_of("audited_ballots").unwrap(),
-                0 < arguments.occurrences_of("force"))?;
+                0 < arguments.occurrences_of("force"),
+            arguments.value_of("xxn_config").unwrap())?;
         },
         ("step6", Some(arguments)) => {
             record_votes(
@@ -266,6 +287,11 @@ async fn main() -> Result<(), Exception> {
             validate_proof(
                 arguments.value_of("inclusion_proof").unwrap())?;
 
+        },
+        ("audit", Some(arguments)) => {
+            blockchain_audit(
+                arguments.value_of("poll_configuration").unwrap(),
+                arguments.value_of("xxn_config").unwrap())?;
         }
         _ => ()
     }

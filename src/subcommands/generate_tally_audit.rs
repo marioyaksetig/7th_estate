@@ -28,7 +28,7 @@ pub fn generate_tally_audit(pollconf_filename: &str, seed: &str) -> Result<()> {
     // Bind the audited columns seed.
     let audited_columns_seed: Vec<u8> = hex::decode(seed)?;
     assert!(audited_columns_seed.len() == CSPRNGSeed::SIZE,
-        format!("Seed for Audited Columns must be {} bytes long.", CSPRNGSeed::SIZE));
+        "Seed for Audited Columns must be {} bytes long.", CSPRNGSeed::SIZE);
     pollconf.audited_columns_seed = Some(seed.to_owned());
 
     // Draw the Audited Column.

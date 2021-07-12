@@ -3,25 +3,35 @@
 //! Post/read information to/from blockchain
 //! Information posted is a merkle root
 
+// Imports for merkle tree handling
 use crate::blockchain::merkle::{CryptoSHA3256Hash, new_tree, CryptoHashData, store_tree};
 use crate::Result;
 use crate::voter_roster::VoterRoster;
 use crate::poll_configuration::PollConfiguration;
 use crate::planes::Plane;
 use crate::debug;
-
-use web3::types::{BlockNumber, Address, TransactionParameters, U256, CallRequest};
-use web3::signing::Key;
 use hex;
-use secp256k1::SecretKey;
-use web3::signing::SecretKeyRef;
 use std::fs::File;
 use serde::{Serialize, Deserialize};
+
+
+// Imports for blockchain audit
+use crate::untagged::*;
+use crate::untagged::{Ballot};
+use std::collections::HashMap;
+use crate::blockchain::etherscan::{Transaction, Response, SubmittedVote};
+
+// Imports to interact with blockchain (web3)
+use web3::types::{BlockNumber, Address, TransactionParameters, U256, CallRequest};
+use web3::signing::Key;
+use secp256k1::SecretKey;
+use web3::signing::SecretKeyRef;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct NetworkConfig {
     node: String,
     key: String,
+    api: String
 }
 
 // returns block #
@@ -30,18 +40,127 @@ pub fn retrieve_from_chain(value: Vec<u8>) -> u64 {
     0
 }
 
+// Map votecodes to choice value
+// More efficient for vote count
+pub fn map_votes(ballots: Vec<Ballot>) -> Result<HashMap<VoteCode, ChoiceValue>> {
+    let mut choices = HashMap::new();
+    
+    // Each votecode is maped to its corresponding Choice value
+    // p.e 1234-1234-1234-1234 => ChoiceValue::For
+    ballots.into_iter()
+            .for_each(|ballot| {
+                // println!("{} {:?} {:?}", ballot.serial, ballot.choice1.votecode, ballot.choice2.votecode);
+                choices.insert(ballot.choice1.votecode, ballot.choice1.choice);
+                choices.insert(ballot.choice2.votecode, ballot.choice2.choice);
+    });
+
+    Ok(choices)
+}
+
+// Decode the vote from the transcation input
+pub fn transaction_to_votecode(transaction: Transaction) -> Option<SubmittedVote> {
+    // Remove '0x' from hex input
+    let vote = &transaction.input[2..];
+    
+    // Decode rest of input into u8
+    let vote: Vec<u8> = match  hex::decode(vote) {
+        Ok(votecode) => votecode,
+        _ => return None
+    };
+
+    let vote: String = match String::from_utf8(vote){
+        Ok(votecode) => votecode,
+        _ => return None
+    };
+
+    let vote: SubmittedVote = match serde_json::from_str(&vote) {
+        Ok(votecode) => votecode,
+        _ => return None
+    };
+
+    Some(vote)
+}
+
+// Count the votes found in the blockchain
+pub fn count_votes(mut choices: HashMap<VoteCode, ChoiceValue>, transactions: Vec<Transaction>) -> Result<()> {
+
+    let mut vote_for: u64 = 0;
+    let mut vote_against: u64 = 0;
+
+    // Run through all transactions
+    transactions.into_iter()
+        .for_each(|transaction| {
+            // Get vote from transaction
+            if let Some(vote) = transaction_to_votecode(transaction) {
+                    let votecode = vote.to_votecode().unwrap();
+                    
+                // Get ChoiceValue of vote
+                if let Some(choice) = choices.remove(&votecode) {
+                    println!("{:?}: {:?}", vote, choice);
+                    // If both votecodes are submitted, they cancel eachother
+                    // Increment the correct counter
+                    match choice {
+                        ChoiceValue::For => vote_for += 1,
+                        ChoiceValue::Against => vote_against += 1,
+                    }
+                }
+            
+            }
+        });
+    
+    println!("Votes for: {}, votes against: {}", vote_for, vote_against);
+    Ok(())
+}
+
+// Get data associated with address
+pub fn get_data(addr: Address, api: String) -> Result <Vec<Transaction>> {
+    let addr = String::from("0x") + &hex::encode(addr.0);
+    let url = format!("https://api-ropsten.etherscan.io/api?module=account&action=txlist&address={}&startblock=0&endblock=99999999&sort=asc&apikey={}", addr, api);
+
+    let response = async {
+        let resp = reqwest::get(&url).await.expect("Error requesting data");
+        let text = resp.text().await.expect("Error retrieving data form request");
+        let data: Response = serde_json::from_str(&text).expect("Problem parsing response from etherscan");
+        data.result
+    };
+    
+    Ok(web3::block_on(response))
+}
+
+// Audit blockchain for votecodes
+// Count votes
+pub fn audit_votes(ballots: Vec<Ballot>, xxn_config: &str) -> Result<()> {
+    // Load configuration file
+    let config = load_xxn(xxn_config)?;
+    
+    // Get private key from config
+    let key = SecretKey::from_slice(&hex::decode(config.key)?)?;
+    let key = SecretKeyRef::new(&key);
+    
+    // Get public address of private key
+    let pub_addr: Address = key.address();
+    
+    // Map vote codes to choices values
+    let choices: HashMap<VoteCode, ChoiceValue> = map_votes(ballots)?;
+
+    // Get data associated with poll addr -> votes submited via web interface
+    let data: Vec<Transaction> = get_data(pub_addr, config.api)?;
+
+    // Count the votes
+    count_votes(choices, data)
+}
+
 // Load blockchain network configurations
-fn load_xxn() -> Result<NetworkConfig>{
-    let config = "examples/xxn_config.yaml";
+fn load_xxn(config: &str) -> Result<NetworkConfig>{
     let config = File::open(config)?;
     let config: NetworkConfig  = serde_yaml::from_reader(config).expect("Error loading XXN config file");
 
     Ok(config)
 }
 
-pub fn post(data: CryptoSHA3256Hash) -> Result<()> {
+pub fn post(xxn: &str, data: CryptoSHA3256Hash) -> Result<()> {
     // Load configuration file
-    let config = load_xxn()?;
+    let config = load_xxn(xxn)?;
 
     // Get private key from config
     let key = SecretKey::from_slice(&hex::decode(config.key)?)?;
@@ -95,7 +214,7 @@ pub fn post(data: CryptoSHA3256Hash) -> Result<()> {
     Ok(())   
 }
 
-pub fn commit (pollconf: PollConfiguration, planes: Vec<Plane>) -> Result<()> {
+pub fn commit (xxn: &str, pollconf: PollConfiguration, planes: Vec<Plane>) -> Result<()> {
     // Re-construct roster
     let roster: VoterRoster = {
         let encoded_roster = pollconf.voter_roster.clone().unwrap();
@@ -147,5 +266,5 @@ pub fn commit (pollconf: PollConfiguration, planes: Vec<Plane>) -> Result<()> {
     store_tree(&merkle_tree, String::from("merkle.yaml"))?;
 
     // Post root to blockchain
-    post(merkle_tree.root())
+    post(xxn, merkle_tree.root())
 }

@@ -7,3 +7,4 @@ pub mod blockchain;
 pub use blockchain::*;
 
 pub mod merkle;
+pub mod etherscan;

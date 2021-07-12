@@ -10,7 +10,7 @@ pub struct AuditedBallotRecord {
     serial: BallotSerial
 }
 
-pub fn record_audited_ballots(pollconf_filename: &str, audited_ballots_filename: &str, force: bool) -> Result<()> {
+pub fn record_audited_ballots(pollconf_filename: &str, audited_ballots_filename: &str, force: bool, xxn: &str) -> Result<()> {
     let pollconf_path = Path::new(pollconf_filename);
 
     // Read poll configuration file.
@@ -106,7 +106,7 @@ pub fn record_audited_ballots(pollconf_filename: &str, audited_ballots_filename:
         File::create(pollconf_path)?,
         &secured_poll_configuration)?;
 
-    blockchain::commit(pollconf, column_planes)?;
+    blockchain::commit(xxn, pollconf, column_planes)?;
 
     Ok(())
 }

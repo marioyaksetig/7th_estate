@@ -45,3 +45,6 @@ pub use sign::*;
 
 pub mod proofs;
 pub use proofs::*;
+
+pub mod audit;
+pub use audit::*;

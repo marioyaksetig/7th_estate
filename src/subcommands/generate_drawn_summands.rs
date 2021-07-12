@@ -35,7 +35,7 @@ pub fn generate_drawn_summands(pollconf_filename: &str, seed: &str, force: bool)
     // Bind the drawn summands seed.
     let drawn_summands_seed: Vec<u8> = hex::decode(seed)?;
     assert!(drawn_summands_seed.len() == CSPRNGSeed::SIZE,
-        format!("Seed for Drawn Summands must be {} bytes long.", CSPRNGSeed::SIZE));
+        "Seed for Drawn Summands must be {} bytes long.", CSPRNGSeed::SIZE);
     pollconf.drawn_summands_seed = Some(seed.to_owned());
 
     // Draw the Summands.
